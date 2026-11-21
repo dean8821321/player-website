@@ -1,0 +1,595 @@
+(() => {
+  "use strict";
+
+  const CONFIG_URL = "https://player-central-config.pages.dev/config.json";
+  const DEFAULT_SITE_TITLE = "My Video Player";
+  const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
+  const ALLOWED_VIDEO_HOSTS = new Set(["cdn.videy.co", "cdn2.videy.co"]);
+
+  const params = new URLSearchParams(window.location.search);
+  const rawVideoId = (params.get("mov") || "").trim().replace(/\.mp4$/i, "");
+
+  const requestedVideoId = VIDEO_ID_PATTERN.test(rawVideoId) ? rawVideoId : "";
+
+  const preview = document.getElementById("previewVideo");
+  const playButton = document.getElementById("playButton");
+  const title = document.getElementById("videoTitle");
+  const previewMessage = document.getElementById("previewMessage");
+  const popupMessage = document.getElementById("popupMessage");
+
+  let activeConfig = null;
+  let activeVideo = null;
+  let activeVideoUrl = null;
+  let activePageName = DEFAULT_SITE_TITLE;
+  let configError = null;
+
+  function isPlainObject(value) {
+    return value !== null && typeof value === "object" && !Array.isArray(value);
+  }
+
+  function isAllowedVideoUrl(value) {
+    if (typeof value !== "string" || !value.trim()) {
+      return false;
+    }
+
+    try {
+      const url = new URL(value);
+
+      return (
+        url.protocol === "https:" &&
+        ALLOWED_VIDEO_HOSTS.has(url.hostname.toLowerCase()) &&
+        /\.mp4$/i.test(url.pathname)
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function isUsableScriptUrl(value) {
+    if (typeof value !== "string" || !value.trim()) {
+      return false;
+    }
+
+    try {
+      const url = new URL(value);
+
+      return (
+        url.protocol === "https:" &&
+        !url.hostname.toLowerCase().endsWith(".invalid")
+      );
+    } catch (_) {
+      return false;
+    }
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+  }
+
+  function getSiteTitle(config) {
+    const configuredTitle = config.site?.title;
+
+    if (typeof configuredTitle === "string" && configuredTitle.trim()) {
+      return configuredTitle.trim();
+    }
+
+    return DEFAULT_SITE_TITLE;
+  }
+
+  function getPageName(config, video) {
+    const pageId = typeof video.pageId === "string" ? video.pageId.trim() : "";
+
+    // Selama video belum dikaitkan dengan halaman,
+    // gunakan nama situs sebagai fallback sementara.
+    if (!pageId) {
+      return getSiteTitle(config);
+    }
+
+    if (!Array.isArray(config.pages)) {
+      throw new Error("Daftar halaman tidak tersedia di konfigurasi pusat.");
+    }
+
+    const page = config.pages.find((item) => {
+      return (
+        isPlainObject(item) &&
+        item.id === pageId &&
+        item.enabled === true &&
+        typeof item.name === "string" &&
+        item.name.trim()
+      );
+    });
+
+    if (!page) {
+      throw new Error(
+        "Halaman yang terhubung dengan video tidak ditemukan atau sedang OFF.",
+      );
+    }
+
+    return page.name.trim();
+  }
+
+  function getVideoFromConfig(config) {
+    if (!isPlainObject(config) || !Array.isArray(config.videos)) {
+      throw new Error("Format konfigurasi video tidak valid.");
+    }
+
+    const configuredDefault =
+      typeof config.site?.defaultVideoId === "string"
+        ? config.site.defaultVideoId.trim()
+        : "";
+
+    const videoId = requestedVideoId || configuredDefault;
+
+    if (!VIDEO_ID_PATTERN.test(videoId)) {
+      throw new Error("Video ID tidak valid atau belum tersedia.");
+    }
+
+    const video = config.videos.find((item) => {
+      return (
+        isPlainObject(item) && item.id === videoId && item.enabled === true
+      );
+    });
+
+    if (!video) {
+      throw new Error("Video tidak ditemukan atau sedang dinonaktifkan.");
+    }
+
+    if (!isAllowedVideoUrl(video.url)) {
+      throw new Error("URL video tidak valid atau bukan CDN Videy.");
+    }
+
+    const pageName = getPageName(config, video);
+
+    return {
+      id: videoId,
+      url: video.url,
+      pageName,
+    };
+  }
+
+  async function loadConfig() {
+    const response = await fetch(CONFIG_URL, {
+      method: "GET",
+      mode: "cors",
+      credentials: "omit",
+      cache: "no-store",
+      headers: {
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(
+        `Konfigurasi pusat gagal dimuat (HTTP ${response.status}).`,
+      );
+    }
+
+    const config = await response.json();
+
+    if (!isPlainObject(config)) {
+      throw new Error("Konfigurasi pusat tidak valid.");
+    }
+
+    return config;
+  }
+
+  function showPreviewError(message) {
+    preview.style.opacity = "0";
+    previewMessage.textContent = message;
+    previewMessage.hidden = false;
+  }
+
+  function initializePreview() {
+    if (!activeVideo || !activeVideoUrl) {
+      showPreviewError("Video belum tersedia.");
+      playButton.disabled = true;
+      playButton.setAttribute("aria-disabled", "true");
+      return;
+    }
+
+    document.title = `${activePageName} - ${activeVideo.id}`;
+
+    title.textContent = `Video ID: ${activeVideo.id}`;
+
+    preview.src = activeVideoUrl;
+
+    playButton.disabled = false;
+    playButton.removeAttribute("aria-disabled");
+
+    preview.addEventListener(
+      "loadedmetadata",
+      () => {
+        const seekTo = Number.isFinite(preview.duration)
+          ? Math.min(0.1, Math.max(0, preview.duration - 0.01))
+          : 0.1;
+
+        try {
+          preview.currentTime = seekTo;
+        } catch (_) {
+          // Thumbnail preview bersifat opsional.
+        }
+      },
+      { once: true },
+    );
+
+    preview.addEventListener(
+      "error",
+      () => {
+        showPreviewError(
+          "Pratinjau belum tersedia. Tekan Play untuk membuka video.",
+        );
+      },
+      { once: true },
+    );
+  }
+
+  function buildAdSlot(slotName, slotConfig) {
+    if (
+      !isPlainObject(slotConfig) ||
+      slotConfig.enabled !== true ||
+      !isUsableScriptUrl(slotConfig.scriptUrl)
+    ) {
+      return "";
+    }
+
+    const width =
+      Number.isInteger(slotConfig.width) && slotConfig.width > 0
+        ? Math.min(slotConfig.width, 1200)
+        : slotName === "top"
+          ? 320
+          : 300;
+
+    const height =
+      Number.isInteger(slotConfig.height) && slotConfig.height > 0
+        ? Math.min(slotConfig.height, 1200)
+        : slotName === "top"
+          ? 50
+          : 250;
+
+    const key = typeof slotConfig.key === "string" ? slotConfig.key : "";
+
+    const format =
+      typeof slotConfig.format === "string" ? slotConfig.format : "iframe";
+
+    const scriptUrl = escapeHtml(slotConfig.scriptUrl);
+
+    return `
+      <div
+        class="ad-slot ad-${slotName}"
+        aria-label="Iklan ${slotName === "top" ? "atas" : "bawah"}"
+        style="min-height:${height}px"
+      >
+        <script>
+          window.atOptions = {
+            key: ${JSON.stringify(key)},
+            format: ${JSON.stringify(format)},
+            height: ${height},
+            width: ${width},
+            params: {}
+          };
+        </script>
+        <script src="${scriptUrl}"></script>
+      </div>
+    `;
+  }
+
+  function buildHistats(config) {
+    const histats = config.histats;
+
+    if (
+      !isPlainObject(histats) ||
+      histats.enabled !== true ||
+      typeof histats.siteId !== "string" ||
+      !histats.siteId.trim() ||
+      !isUsableScriptUrl(histats.scriptUrl)
+    ) {
+      return "";
+    }
+
+    const siteId = histats.siteId.trim();
+    const scriptUrl = histats.scriptUrl;
+
+    return `
+      <script>
+        window._Hasync = window._Hasync || [];
+
+        window._Hasync.push([
+          'Histats.start',
+          ${JSON.stringify(siteId)}
+        ]);
+
+        window._Hasync.push(['Histats.fasi', '1']);
+        window._Hasync.push(['Histats.track_hits', '']);
+
+        (function () {
+          var hs = document.createElement('script');
+          hs.async = true;
+          hs.src = ${JSON.stringify(scriptUrl)};
+          document.head.appendChild(hs);
+        })();
+      </script>
+    `;
+  }
+
+  function buildPlayerHtml() {
+    const pageName = escapeHtml(activePageName);
+    const videoId = escapeHtml(activeVideo.id);
+    const videoUrl = escapeHtml(activeVideoUrl);
+
+    const topAd =
+      activeConfig.ads?.enabled === true
+        ? buildAdSlot("top", activeConfig.ads.top)
+        : "";
+
+    const bottomAd =
+      activeConfig.ads?.enabled === true
+        ? buildAdSlot("bottom", activeConfig.ads.bottom)
+        : "";
+
+    const histatsScript = buildHistats(activeConfig);
+
+    return `<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#000000">
+
+  <title>${pageName} - ${videoId}</title>
+
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      margin: 0;
+      width: 100%;
+      min-height: 100%;
+      overflow-x: hidden;
+      background: #000;
+      color: #fff;
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+      padding: 12px 6px;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    main {
+      width: 100%;
+      max-width: 600px;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .ad-slot {
+      width: 100%;
+      min-width: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      overflow: hidden;
+    }
+
+    .ad-top {
+      min-height: 50px;
+    }
+
+    .ad-bottom {
+      min-height: 250px;
+    }
+
+    .video-block {
+      width: 100%;
+      max-width: 450px;
+      min-width: 0;
+    }
+
+    video {
+      display: block;
+      width: 100%;
+      height: auto;
+      max-height: 75vh;
+      max-height: 75dvh;
+      object-fit: contain;
+      background: #000;
+      border-radius: 6px;
+    }
+
+    #videoError {
+      display: none;
+      margin: 12px 8px 0;
+      padding: 12px;
+      border: 1px solid #555;
+      border-radius: 6px;
+      background: #191919;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    #videoError a {
+      color: #91c8ff;
+    }
+
+    @media (max-width: 600px) {
+      body {
+        padding: 0;
+      }
+
+      main {
+        max-width: none;
+        gap: 8px;
+      }
+
+      .ad-top {
+        padding-top: 4px;
+      }
+
+      .video-block {
+        max-width: none;
+        width: 100%;
+      }
+
+      video {
+        width: 100%;
+        height: auto;
+        max-height: calc(100vh - 80px);
+        max-height: calc(100dvh - 80px);
+        object-fit: contain;
+        border-radius: 0;
+      }
+
+      .ad-bottom {
+        padding-bottom: 8px;
+      }
+    }
+
+    @media (max-height: 520px) and (orientation: landscape) {
+      video {
+        max-height: 70vh;
+        max-height: 70dvh;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main>
+    ${topAd}
+
+    <div class="video-block">
+      <video
+        id="player"
+        controls
+        autoplay
+        muted
+        playsinline
+        preload="metadata"
+        src="${videoUrl}"
+      >
+        Browser Anda tidak mendukung video HTML5.
+      </video>
+
+      <div id="videoError" role="alert">
+        Video gagal dimuat. Periksa URL Videy atau
+        <a
+          href="${videoUrl}"
+          target="_blank"
+          rel="noopener noreferrer"
+        >buka MP4 langsung</a>.
+      </div>
+    </div>
+
+    ${bottomAd}
+  </main>
+
+  ${histatsScript}
+
+  <script>
+    (function () {
+      var player = document.getElementById('player');
+      var error = document.getElementById('videoError');
+
+      player.addEventListener('error', function () {
+        error.style.display = 'block';
+      });
+
+      var attempt = player.play();
+
+      if (attempt && typeof attempt.catch === 'function') {
+        attempt.catch(function () {
+          // Pengunjung tetap dapat memakai kontrol Play.
+        });
+      }
+    })();
+  </script>
+</body>
+</html>`;
+  }
+
+  function handlePlayClick() {
+    popupMessage.hidden = true;
+
+    // Membuka tab langsung dari event klik pengguna.
+    const newTab = window.open("about:blank", "_blank");
+
+    if (!newTab) {
+      popupMessage.hidden = false;
+      return;
+    }
+
+    try {
+      if (configError) {
+        throw configError;
+      }
+
+      if (!activeConfig || !activeVideo || !activeVideoUrl) {
+        throw new Error("Video belum tersedia atau belum diaktifkan.");
+      }
+
+      newTab.document.open();
+      newTab.document.write(buildPlayerHtml());
+      newTab.document.close();
+
+      newTab.opener = null;
+    } catch (error) {
+      console.error("Gagal membuka player:", error);
+
+      popupMessage.textContent =
+        error.message || "Player gagal dibuka. Coba muat ulang halaman.";
+
+      popupMessage.hidden = false;
+
+      try {
+        newTab.close();
+      } catch (_) {
+        // Tidak perlu tindakan tambahan.
+      }
+    }
+  }
+
+  playButton.addEventListener("click", handlePlayClick);
+
+  loadConfig()
+    .then((config) => {
+      activeConfig = config;
+
+      activeVideo = getVideoFromConfig(config);
+
+      activeVideoUrl = activeVideo ? activeVideo.url : null;
+
+      activePageName = activeVideo
+        ? activeVideo.pageName
+        : getSiteTitle(config);
+
+      initializePreview();
+    })
+    .catch((error) => {
+      configError = error;
+
+      console.error("Gagal memuat konfigurasi pusat:", error);
+
+      document.title = DEFAULT_SITE_TITLE;
+
+      showPreviewError(
+        error.message || "Konfigurasi pusat belum dapat dimuat.",
+      );
+
+      title.textContent = DEFAULT_SITE_TITLE;
+
+      playButton.disabled = true;
+      playButton.setAttribute("aria-disabled", "true");
+    });
+})();
