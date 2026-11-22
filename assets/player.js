@@ -364,14 +364,9 @@
     clearLpAdSlot(lpAdBottom);
 
     const ads = isPlainObject(config?.ads) ? config.ads : null;
+    const lp = ads && isPlainObject(ads.lp) ? ads.lp : null;
 
-    if (!ads || ads.enabled !== true) {
-      setLpReserve([]);
-      return;
-    }
-
-    const lp = isPlainObject(ads.lp) ? ads.lp : null;
-
+    // Iklan LP punya saklar sendiri, tidak ikut saklar iklan player.
     if (!lp || lp.enabled !== true || !isUsableScriptUrl(lp.scriptUrl)) {
       setLpReserve([]);
       return;
