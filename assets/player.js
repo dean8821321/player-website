@@ -394,6 +394,15 @@
     setLpReserve(slots);
   }
 
+  // Iklan bisa mengubah tinggi slotnya sendiri; reserve ikut disesuaikan.
+  if (typeof ResizeObserver === "function") {
+    const observer = new ResizeObserver(() => syncLpReserve());
+    if (lpAdTop) observer.observe(lpAdTop);
+    if (lpAdBottom) observer.observe(lpAdBottom);
+  }
+
+  window.addEventListener("resize", syncLpReserve);
+
   function buildHistats(config) {
     const histats = config.histats;
 
