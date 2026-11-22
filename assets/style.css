@@ -24,14 +24,31 @@ body {
 .preview-page {
   min-height: 100vh;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   padding: 10px;
+}
+.lp-ad-slot {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 450px;
+  overflow: hidden;
+}
+.lp-ad-slot iframe {
+  display: block;
+  border: 0;
+  max-width: 100%;
 }
 .preview-card {
   position: relative;
   width: 100%;
-  max-width: 450px;
+  /* Lebar dibatasi supaya kartu 9:16 selalu muat bersama slot iklan. */
+  max-width: min(450px, calc((100vh - var(--lp-ad-reserve, 20px)) * 9 / 16));
+  max-width: min(450px, calc((100dvh - var(--lp-ad-reserve, 20px)) * 9 / 16));
   aspect-ratio: 9 / 16;
   overflow: hidden;
   border-radius: 8px;
@@ -110,7 +127,9 @@ body {
 
 @media (max-width: 480px) {
   .preview-card {
-    max-width: 350px;
+    /* Batas 350px tetap, tapi tetap mengecil kalau iklan LP memakan ruang. */
+    max-width: min(350px, calc((100vh - var(--lp-ad-reserve, 20px)) * 9 / 16));
+    max-width: min(350px, calc((100dvh - var(--lp-ad-reserve, 20px)) * 9 / 16));
     border-radius: 4px;
   }
   .play-button {

@@ -16,6 +16,9 @@
   const title = document.getElementById("videoTitle");
   const previewMessage = document.getElementById("previewMessage");
   const popupMessage = document.getElementById("popupMessage");
+  const lpAdTop = document.getElementById("lpAdTop");
+  const lpAdBottom = document.getElementById("lpAdBottom");
+  const previewPage = document.getElementById("previewPage");
 
   let activeConfig = null;
   let activeVideo = null;
@@ -276,6 +279,119 @@
         <script src="${scriptUrl}"></script>
       </div>
     `;
+  }
+
+  function clearLpAdSlot(element) {
+    if (!element) return;
+
+    element.replaceChildren();
+    element.style.minHeight = "";
+    element.hidden = true;
+  }
+
+  // Menyisakan ruang untuk slot iklan supaya kartu 9:16 tidak pernah
+  // mendorong tombol Play keluar layar.
+  function setLpReserve(slots) {
+    if (!previewPage) return;
+
+    const gap = 8;
+    const padding = 20;
+    const total = slots.reduce((sum, item) => sum + item, 0);
+
+    previewPage.style.setProperty(
+      "--lp-ad-reserve",
+      `${padding + slots.length * gap + total}px`,
+    );
+  }
+
+  function syncLpReserve() {
+    const slots = [lpAdTop, lpAdBottom]
+      .filter((element) => element && !element.hidden)
+      .map((element) => element.getBoundingClientRect().height);
+
+    setLpReserve(slots);
+  }
+
+  function mountLpAdSlot(element, slotConfig, label) {
+    if (!element) return 0;
+
+    const width =
+      Number.isInteger(slotConfig.width) && slotConfig.width > 0
+        ? Math.min(slotConfig.width, 1200)
+        : 320;
+
+    const height =
+      Number.isInteger(slotConfig.height) && slotConfig.height > 0
+        ? Math.min(slotConfig.height, 1200)
+        : 50;
+
+    const key = typeof slotConfig.key === "string" ? slotConfig.key : "";
+
+    const format =
+      typeof slotConfig.format === "string" ? slotConfig.format : "iframe";
+
+    const scriptUrl = slotConfig.scriptUrl.trim();
+
+    element.replaceChildren();
+    element.style.minHeight = `${height}px`;
+    element.setAttribute("aria-label", `Iklan ${label}`);
+    element.hidden = false;
+
+    const script = document.createElement("script");
+    script.src = scriptUrl;
+    script.async = true;
+    script.addEventListener(
+      "error",
+      () => {
+        console.warn(`Script iklan LP ${label} gagal dimuat.`);
+        clearLpAdSlot(element);
+        syncLpReserve();
+      },
+      { once: true },
+    );
+
+    // Dipasang tepat sebelum script dimuat supaya network iklan
+    // membaca ukuran yang benar.
+    window.atOptions = { key, format, height, width, params: {} };
+
+    element.appendChild(script);
+
+    return height;
+  }
+
+  function renderLpAds(config) {
+    clearLpAdSlot(lpAdTop);
+    clearLpAdSlot(lpAdBottom);
+
+    const ads = isPlainObject(config?.ads) ? config.ads : null;
+
+    if (!ads || ads.enabled !== true) {
+      setLpReserve([]);
+      return;
+    }
+
+    const lp = isPlainObject(ads.lp) ? ads.lp : null;
+
+    if (!lp || lp.enabled !== true || !isUsableScriptUrl(lp.scriptUrl)) {
+      setLpReserve([]);
+      return;
+    }
+
+    const position = ["top", "bottom", "both"].includes(lp.position)
+      ? lp.position
+      : "top";
+
+    const slots = [];
+
+    if (position === "top" || position === "both") {
+      slots.push(mountLpAdSlot(lpAdTop, lp, "atas"));
+    }
+
+    if (position === "bottom" || position === "both") {
+      slots.push(mountLpAdSlot(lpAdBottom, lp, "bawah"));
+    }
+
+    setLpReserve(slots);
   }
 
   function buildHistats(config) {
@@ -566,6 +682,8 @@
     .then((config) => {
       activeConfig = config;
 
+      renderLpAds(config);
+
       activeVideo = getVideoFromConfig(config);
 
       activeVideoUrl = activeVideo ? activeVideo.url : null;
@@ -582,6 +700,10 @@
       console.error("Gagal memuat konfigurasi pusat:", error);
 
       document.title = DEFAULT_SITE_TITLE;
+
+      clearLpAdSlot(lpAdTop);
+      clearLpAdSlot(lpAdBottom);
+      setLpReserve([]);
 
       showPreviewError(
         error.message || "Konfigurasi pusat belum dapat dimuat.",

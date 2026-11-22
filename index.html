@@ -9,7 +9,9 @@
     <script src="assets/player.js" defer></script>
   </head>
   <body>
-    <main class="preview-page">
+    <main class="preview-page" id="previewPage">
+      <div class="lp-ad-slot" id="lpAdTop" aria-label="Iklan atas" hidden></div>
+
       <section class="preview-card" aria-label="Pratinjau video">
         <video
           class="preview-video"
@@ -38,6 +40,8 @@
           lagi.
         </p>
       </section>
+
+      <div class="lp-ad-slot" id="lpAdBottom" aria-label="Iklan bawah" hidden></div>
     </main>
   </body>
 </html>
