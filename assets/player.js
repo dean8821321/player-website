@@ -2,6 +2,8 @@
   "use strict";
 
   const CONFIG_URL = "https://player-central-config.pages.dev/config.json";
+  const CONFIG_CACHE_KEY = "player-config-cache-v1";
+  const CONFIG_CACHE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
   const DEFAULT_SITE_TITLE = "My Video Player";
   const VIDEO_ID_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
   const ALLOWED_VIDEO_HOSTS = new Set(["cdn.videy.co", "cdn2.videy.co"]);
@@ -203,30 +205,77 @@
     };
   }
 
-  async function loadConfig() {
-    const response = await fetch(CONFIG_URL, {
-      method: "GET",
-      mode: "cors",
-      credentials: "omit",
-      cache: "no-store",
-      headers: {
-        Accept: "application/json",
-      },
-    });
+  function readConfigCache() {
+    try {
+      const raw = window.localStorage.getItem(CONFIG_CACHE_KEY);
+      if (!raw) return null;
 
-    if (!response.ok) {
-      throw new Error(
-        `Konfigurasi pusat gagal dimuat (HTTP ${response.status}).`,
+      const parsed = JSON.parse(raw);
+      if (!isPlainObject(parsed) || !isPlainObject(parsed.config)) return null;
+
+      const savedAt = Number(parsed.savedAt);
+      if (!Number.isFinite(savedAt)) return null;
+      if (Date.now() - savedAt > CONFIG_CACHE_MAX_AGE_MS) return null;
+
+      return parsed.config;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function saveConfigCache(config) {
+    try {
+      window.localStorage.setItem(
+        CONFIG_CACHE_KEY,
+        JSON.stringify({ savedAt: Date.now(), config }),
       );
+    } catch (_) {
+      // localStorage penuh atau diblokir: abaikan, tidak fatal.
     }
+  }
 
-    const config = await response.json();
+  async function loadConfig() {
+    try {
+      // Cache HTTP normal: config.json punya max-age=60 di server,
+      // jadi browser tidak perlu mengambil ulang di setiap kunjungan.
+      const response = await fetch(CONFIG_URL, {
+        method: "GET",
+        mode: "cors",
+        credentials: "omit",
+        cache: "default",
+        headers: {
+          Accept: "application/json",
+        },
+      });
 
-    if (!isPlainObject(config)) {
-      throw new Error("Konfigurasi pusat tidak valid.");
+      if (!response.ok) {
+        throw new Error(
+          `Konfigurasi pusat gagal dimuat (HTTP ${response.status}).`,
+        );
+      }
+
+      const config = await response.json();
+
+      if (!isPlainObject(config)) {
+        throw new Error("Konfigurasi pusat tidak valid.");
+      }
+
+      saveConfigCache(config);
+
+      return config;
+    } catch (error) {
+      const cached = readConfigCache();
+
+      if (cached) {
+        console.warn(
+          "Config pusat gagal dimuat, memakai salinan terakhir dari browser:",
+          error,
+        );
+        return cached;
+      }
+
+      throw error;
     }
-
-    return config;
   }
 
   function showPreviewError(message) {
