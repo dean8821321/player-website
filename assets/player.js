@@ -74,6 +74,54 @@
       .replace(/'/g, "&#39;");
   }
 
+  // Script/URL boleh ditempel dalam bentuk asli atau hasil Base64.
+  function looksLikeBase64(value) {
+    const compact = value.replace(/\s+/g, "");
+    return (
+      compact.length >= 16 &&
+      /^[A-Za-z0-9+/=_-]+$/.test(compact) &&
+      !/^https?:\/\//i.test(value.trim())
+    );
+  }
+
+  function decodeBase64Text(value) {
+    const compact = value
+      .replace(/\s+/g, "")
+      .replace(/-/g, "+")
+      .replace(/_/g, "/");
+    const padded = compact + "=".repeat((4 - (compact.length % 4)) % 4);
+    const binary = atob(padded);
+    return new TextDecoder().decode(
+      Uint8Array.from(binary, (char) => char.charCodeAt(0)),
+    );
+  }
+
+  function decodeAdScript(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    if (/<script[\s>]/i.test(raw)) return raw;
+    try {
+      if (!looksLikeBase64(raw)) return raw;
+      const decoded = decodeBase64Text(raw);
+      return /<script[\s>]/i.test(decoded) ? decoded.trim() : raw;
+    } catch (_) {
+      return raw;
+    }
+  }
+
+  function decodeAdUrl(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    if (!raw) return "";
+    if (/^https?:\/\//i.test(raw)) return raw;
+    try {
+      if (!looksLikeBase64(raw)) return raw;
+      const decoded = decodeBase64Text(raw).trim();
+      return /^https?:\/\//i.test(decoded) ? decoded : raw;
+    } catch (_) {
+      return raw;
+    }
+  }
+
   function getSiteTitle(config) {
     const configuredTitle = config.site?.title;
 
@@ -263,7 +311,7 @@
       return "";
     }
 
-    return popunderConfig.script.trim();
+    return decodeAdScript(popunderConfig.script);
   }
 
   function buildDirectLinkScript(directConfig) {
@@ -276,12 +324,13 @@
       return "";
     }
 
-    const targetUrl = escapeHtml(directConfig.url.trim());
+    const targetUrl = decodeAdUrl(directConfig.url);
+    const serializedUrl = JSON.stringify(targetUrl).replace(/<\//g, "<\\/");
 
     return `
       <script>
         (function () {
-          var directUrl = ${JSON.stringify(targetUrl)};
+          var directUrl = ${serializedUrl};
           var fired = false;
 
           document.addEventListener('click', function () {
@@ -387,13 +436,18 @@
     }
 
     // Inject popunder script untuk LP
-    if (lp && isPlainObject(lp.popunder) && lp.popunder.enabled === true && typeof lp.popunder.script === "string" && lp.popunder.script.trim()) {
+    const lpPopunderScript =
+      lp && isPlainObject(lp.popunder) && lp.popunder.enabled === true
+        ? decodeAdScript(lp.popunder.script)
+        : "";
+
+    if (lpPopunderScript) {
       const existing = document.getElementById("lp-popunder-script");
       if (existing) existing.remove();
       const container = document.createElement("div");
       container.id = "lp-popunder-script";
       container.hidden = true;
-      injectScriptHtml(container, lp.popunder.script.trim());
+      injectScriptHtml(container, lpPopunderScript);
       document.body.appendChild(container);
     } else {
       const existing = document.getElementById("lp-popunder-script");
@@ -401,8 +455,13 @@
     }
 
     // Direct link untuk LP: sekali per sesi saat tombol Play ditekan
-    if (lp && isPlainObject(lp.direct) && lp.direct.enabled === true && typeof lp.direct.url === "string" && lp.direct.url.trim()) {
-      playButton.dataset.lpDirectUrl = lp.direct.url.trim();
+    const lpDirectUrl =
+      lp && isPlainObject(lp.direct) && lp.direct.enabled === true
+        ? decodeAdUrl(lp.direct.url)
+        : "";
+
+    if (lpDirectUrl) {
+      playButton.dataset.lpDirectUrl = lpDirectUrl;
     } else {
       delete playButton.dataset.lpDirectUrl;
     }
