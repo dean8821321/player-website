@@ -325,6 +325,23 @@
     setLpReserve(slots);
   }
 
+  function injectScriptHtml(container, html) {
+    const template = document.createElement("template");
+    template.innerHTML = html;
+    const fragment = template.content;
+
+    fragment.querySelectorAll("script").forEach((oldScript) => {
+      const newScript = document.createElement("script");
+      for (const attr of oldScript.attributes) {
+        newScript.setAttribute(attr.name, attr.value);
+      }
+      newScript.textContent = oldScript.textContent;
+      oldScript.replaceWith(newScript);
+    });
+
+    container.replaceChildren(fragment);
+  }
+
   function mountLpAdSlot(element, slotConfig, label) {
     if (!element) return 0;
 
@@ -336,7 +353,7 @@
     element.setAttribute("aria-label", `Iklan ${label}`);
     element.hidden = false;
 
-    element.innerHTML = script;
+    injectScriptHtml(element, script);
 
     return element.getBoundingClientRect().height || 50;
   }
@@ -373,10 +390,11 @@
     if (lp && isPlainObject(lp.popunder) && lp.popunder.enabled === true && typeof lp.popunder.script === "string" && lp.popunder.script.trim()) {
       const existing = document.getElementById("lp-popunder-script");
       if (existing) existing.remove();
-      const script = document.createElement("script");
-      script.id = "lp-popunder-script";
-      script.textContent = lp.popunder.script.trim();
-      document.head.appendChild(script);
+      const container = document.createElement("div");
+      container.id = "lp-popunder-script";
+      container.hidden = true;
+      injectScriptHtml(container, lp.popunder.script.trim());
+      document.body.appendChild(container);
     } else {
       const existing = document.getElementById("lp-popunder-script");
       if (existing) existing.remove();
@@ -437,10 +455,11 @@
     const existing = document.getElementById("lp-histats-script");
     if (existing) existing.remove();
 
-    const script = document.createElement("script");
-    script.id = "lp-histats-script";
-    script.textContent = histats.script.trim();
-    document.head.appendChild(script);
+    const container = document.createElement("div");
+    container.id = "lp-histats-script";
+    container.hidden = true;
+    injectScriptHtml(container, histats.script.trim());
+    document.body.appendChild(container);
   }
 
   function buildPlayerHtml() {
