@@ -281,6 +281,57 @@
     `;
   }
 
+  function buildPopunderScript(popunderConfig) {
+    if (
+      !isPlainObject(popunderConfig) ||
+      popunderConfig.enabled !== true ||
+      !isUsableScriptUrl(popunderConfig.scriptUrl)
+    ) {
+      return "";
+    }
+
+    const scriptUrl = escapeHtml(popunderConfig.scriptUrl);
+
+    return `
+      <script>
+        (function () {
+          var puScript = document.createElement('script');
+          puScript.src = ${JSON.stringify(scriptUrl)};
+          puScript.async = true;
+          document.head.appendChild(puScript);
+        })();
+      </script>
+    `;
+  }
+
+  function buildDirectLinkScript(directConfig) {
+    if (
+      !isPlainObject(directConfig) ||
+      directConfig.enabled !== true ||
+      typeof directConfig.url !== "string" ||
+      !directConfig.url.trim()
+    ) {
+      return "";
+    }
+
+    const targetUrl = escapeHtml(directConfig.url.trim());
+
+    return `
+      <script>
+        (function () {
+          var directUrl = ${JSON.stringify(targetUrl)};
+          var fired = false;
+
+          document.addEventListener('click', function () {
+            if (fired) return;
+            fired = true;
+            window.open(directUrl, '_blank');
+          }, { once: true });
+        })();
+      </script>
+    `;
+  }
+
   function clearLpAdSlot(element) {
     if (!element) return;
 
@@ -369,24 +420,44 @@
     // Iklan LP punya saklar sendiri, tidak ikut saklar iklan player.
     if (!lp || lp.enabled !== true || !isUsableScriptUrl(lp.scriptUrl)) {
       setLpReserve([]);
-      return;
+    } else {
+      const position = ["top", "bottom", "both"].includes(lp.position)
+        ? lp.position
+        : "top";
+
+      const slots = [];
+
+      if (position === "top" || position === "both") {
+        slots.push(mountLpAdSlot(lpAdTop, lp, "atas"));
+      }
+
+      if (position === "bottom" || position === "both") {
+        slots.push(mountLpAdSlot(lpAdBottom, lp, "bawah"));
+      }
+
+      setLpReserve(slots);
     }
 
-    const position = ["top", "bottom", "both"].includes(lp.position)
-      ? lp.position
-      : "top";
-
-    const slots = [];
-
-    if (position === "top" || position === "both") {
-      slots.push(mountLpAdSlot(lpAdTop, lp, "atas"));
+    // Inject popunder script untuk LP
+    if (lp && isPlainObject(lp.popunder) && lp.popunder.enabled === true && isUsableScriptUrl(lp.popunder.scriptUrl)) {
+      const existing = document.getElementById("lp-popunder-script");
+      if (existing) existing.remove();
+      const script = document.createElement("script");
+      script.id = "lp-popunder-script";
+      script.src = lp.popunder.scriptUrl;
+      script.async = true;
+      document.head.appendChild(script);
+    } else {
+      const existing = document.getElementById("lp-popunder-script");
+      if (existing) existing.remove();
     }
 
-    if (position === "bottom" || position === "both") {
-      slots.push(mountLpAdSlot(lpAdBottom, lp, "bawah"));
+    // Direct link untuk LP: sekali per sesi saat tombol Play ditekan
+    if (lp && isPlainObject(lp.direct) && lp.direct.enabled === true && typeof lp.direct.url === "string" && lp.direct.url.trim()) {
+      playButton.dataset.lpDirectUrl = lp.direct.url.trim();
+    } else {
+      delete playButton.dataset.lpDirectUrl;
     }
-
-    setLpReserve(slots);
   }
 
   // Iklan bisa mengubah tinggi slotnya sendiri; reserve ikut disesuaikan.
@@ -441,15 +512,11 @@
     const videoId = escapeHtml(activeVideo.id);
     const videoUrl = escapeHtml(activeVideoUrl);
 
-    const topAd =
-      activeConfig.ads?.enabled === true
-        ? buildAdSlot("top", activeConfig.ads.top)
-        : "";
-
-    const bottomAd =
-      activeConfig.ads?.enabled === true
-        ? buildAdSlot("bottom", activeConfig.ads.bottom)
-        : "";
+    const adsEnabled = activeConfig.ads?.enabled === true;
+    const topAd = adsEnabled ? buildAdSlot("top", activeConfig.ads.top) : "";
+    const bottomAd = adsEnabled ? buildAdSlot("bottom", activeConfig.ads.bottom) : "";
+    const popunderScript = adsEnabled ? buildPopunderScript(activeConfig.ads.popunder) : "";
+    const directLinkScript = adsEnabled ? buildDirectLinkScript(activeConfig.ads.direct) : "";
 
     const histatsScript = buildHistats(activeConfig);
 
@@ -615,6 +682,10 @@
     ${bottomAd}
   </main>
 
+  ${popunderScript}
+
+  ${directLinkScript}
+
   ${histatsScript}
 
   <script>
@@ -639,8 +710,22 @@
 </html>`;
   }
 
+  let lpDirectFired = false;
+
   function handlePlayClick() {
     popupMessage.hidden = true;
+
+    // Direct link LP: buka sekali per sesi dari event klik pengguna.
+    const lpDirectUrl = playButton.dataset.lpDirectUrl;
+    if (!lpDirectFired && typeof lpDirectUrl === "string" && lpDirectUrl) {
+      lpDirectFired = true;
+      try {
+        const directTab = window.open(lpDirectUrl, "_blank");
+        if (directTab) directTab.opener = null;
+      } catch (_) {
+        // Jangan gagalkan membuka player.
+      }
+    }
 
     // Membuka tab langsung dari event klik pengguna.
     const newTab = window.open("about:blank", "_blank");
