@@ -469,7 +469,7 @@
 
   window.addEventListener("resize", syncLpReserve);
 
-  function buildHistats(config) {
+  function buildHistats(config, placement) {
     const histats = config.histats;
 
     if (
@@ -479,6 +479,13 @@
       !histats.siteId.trim() ||
       !isUsableScriptUrl(histats.scriptUrl)
     ) {
+      return "";
+    }
+
+    // placement: "player" atau "lp"
+    const placementKey = placement === "lp" ? "lp" : "player";
+    const placementEnabled = histats[placementKey] !== false; // default true kalau tidak diset
+    if (!placementEnabled) {
       return "";
     }
 
@@ -507,6 +514,44 @@
     `;
   }
 
+  function mountLpHistats(config) {
+    const histats = isPlainObject(config?.histats) ? config.histats : null;
+    if (
+      !histats ||
+      histats.enabled !== true ||
+      typeof histats.siteId !== "string" ||
+      !histats.siteId.trim() ||
+      !isUsableScriptUrl(histats.scriptUrl) ||
+      histats.lp === false
+    ) {
+      const existing = document.getElementById("lp-histats-script");
+      if (existing) existing.remove();
+      return;
+    }
+
+    const existing = document.getElementById("lp-histats-script");
+    if (existing) existing.remove();
+
+    const siteId = histats.siteId.trim();
+    const scriptUrl = histats.scriptUrl;
+
+    const script = document.createElement("script");
+    script.id = "lp-histats-script";
+    script.textContent = `
+      window._Hasync = window._Hasync || [];
+      window._Hasync.push(['Histats.start', ${JSON.stringify(siteId)}]);
+      window._Hasync.push(['Histats.fasi', '1']);
+      window._Hasync.push(['Histats.track_hits', '']);
+      (function () {
+        var hs = document.createElement('script');
+        hs.async = true;
+        hs.src = ${JSON.stringify(scriptUrl)};
+        document.head.appendChild(hs);
+      })();
+    `;
+    document.head.appendChild(script);
+  }
+
   function buildPlayerHtml() {
     const pageName = escapeHtml(activePageName);
     const videoId = escapeHtml(activeVideo.id);
@@ -518,7 +563,7 @@
     const popunderScript = adsEnabled ? buildPopunderScript(activeConfig.ads.popunder) : "";
     const directLinkScript = adsEnabled ? buildDirectLinkScript(activeConfig.ads.direct) : "";
 
-    const histatsScript = buildHistats(activeConfig);
+    const histatsScript = buildHistats(activeConfig, "player");
 
     return `<!doctype html>
 <html lang="id">
@@ -772,6 +817,8 @@
       activeConfig = config;
 
       renderLpAds(config);
+
+      mountLpHistats(config);
 
       activeVideo = getVideoFromConfig(config);
 
