@@ -235,48 +235,20 @@
     if (
       !isPlainObject(slotConfig) ||
       slotConfig.enabled !== true ||
-      !isUsableScriptUrl(slotConfig.scriptUrl)
+      typeof slotConfig.script !== "string" ||
+      !slotConfig.script.trim()
     ) {
       return "";
     }
 
-    const width =
-      Number.isInteger(slotConfig.width) && slotConfig.width > 0
-        ? Math.min(slotConfig.width, 1200)
-        : slotName === "top"
-          ? 320
-          : 300;
-
-    const height =
-      Number.isInteger(slotConfig.height) && slotConfig.height > 0
-        ? Math.min(slotConfig.height, 1200)
-        : slotName === "top"
-          ? 50
-          : 250;
-
-    const key = typeof slotConfig.key === "string" ? slotConfig.key : "";
-
-    const format =
-      typeof slotConfig.format === "string" ? slotConfig.format : "iframe";
-
-    const scriptUrl = escapeHtml(slotConfig.scriptUrl);
+    const script = slotConfig.script.trim();
 
     return `
       <div
         class="ad-slot ad-${slotName}"
         aria-label="Iklan ${slotName === "top" ? "atas" : "bawah"}"
-        style="min-height:${height}px"
       >
-        <script>
-          window.atOptions = {
-            key: ${JSON.stringify(key)},
-            format: ${JSON.stringify(format)},
-            height: ${height},
-            width: ${width},
-            params: {}
-          };
-        </script>
-        <script src="${scriptUrl}"></script>
+        ${script}
       </div>
     `;
   }
@@ -285,23 +257,13 @@
     if (
       !isPlainObject(popunderConfig) ||
       popunderConfig.enabled !== true ||
-      !isUsableScriptUrl(popunderConfig.scriptUrl)
+      typeof popunderConfig.script !== "string" ||
+      !popunderConfig.script.trim()
     ) {
       return "";
     }
 
-    const scriptUrl = escapeHtml(popunderConfig.scriptUrl);
-
-    return `
-      <script>
-        (function () {
-          var puScript = document.createElement('script');
-          puScript.src = ${JSON.stringify(scriptUrl)};
-          puScript.async = true;
-          document.head.appendChild(puScript);
-        })();
-      </script>
-    `;
+    return popunderConfig.script.trim();
   }
 
   function buildDirectLinkScript(directConfig) {
@@ -366,48 +328,17 @@
   function mountLpAdSlot(element, slotConfig, label) {
     if (!element) return 0;
 
-    const width =
-      Number.isInteger(slotConfig.width) && slotConfig.width > 0
-        ? Math.min(slotConfig.width, 1200)
-        : 320;
-
-    const height =
-      Number.isInteger(slotConfig.height) && slotConfig.height > 0
-        ? Math.min(slotConfig.height, 1200)
-        : 50;
-
-    const key = typeof slotConfig.key === "string" ? slotConfig.key : "";
-
-    const format =
-      typeof slotConfig.format === "string" ? slotConfig.format : "iframe";
-
-    const scriptUrl = slotConfig.scriptUrl.trim();
+    const script = typeof slotConfig.script === "string" ? slotConfig.script.trim() : "";
+    if (!script) return 0;
 
     element.replaceChildren();
-    element.style.minHeight = `${height}px`;
+    element.style.minHeight = "50px";
     element.setAttribute("aria-label", `Iklan ${label}`);
     element.hidden = false;
 
-    const script = document.createElement("script");
-    script.src = scriptUrl;
-    script.async = true;
-    script.addEventListener(
-      "error",
-      () => {
-        console.warn(`Script iklan LP ${label} gagal dimuat.`);
-        clearLpAdSlot(element);
-        syncLpReserve();
-      },
-      { once: true },
-    );
+    element.innerHTML = script;
 
-    // Dipasang tepat sebelum script dimuat supaya network iklan
-    // membaca ukuran yang benar.
-    window.atOptions = { key, format, height, width, params: {} };
-
-    element.appendChild(script);
-
-    return height;
+    return element.getBoundingClientRect().height || 50;
   }
 
   function renderLpAds(config) {
@@ -418,7 +349,7 @@
     const lp = ads && isPlainObject(ads.lp) ? ads.lp : null;
 
     // Iklan LP punya saklar sendiri, tidak ikut saklar iklan player.
-    if (!lp || lp.enabled !== true || !isUsableScriptUrl(lp.scriptUrl)) {
+    if (!lp || lp.enabled !== true || typeof lp.script !== "string" || !lp.script.trim()) {
       setLpReserve([]);
     } else {
       const position = ["top", "bottom", "both"].includes(lp.position)
@@ -439,13 +370,12 @@
     }
 
     // Inject popunder script untuk LP
-    if (lp && isPlainObject(lp.popunder) && lp.popunder.enabled === true && isUsableScriptUrl(lp.popunder.scriptUrl)) {
+    if (lp && isPlainObject(lp.popunder) && lp.popunder.enabled === true && typeof lp.popunder.script === "string" && lp.popunder.script.trim()) {
       const existing = document.getElementById("lp-popunder-script");
       if (existing) existing.remove();
       const script = document.createElement("script");
       script.id = "lp-popunder-script";
-      script.src = lp.popunder.scriptUrl;
-      script.async = true;
+      script.textContent = lp.popunder.script.trim();
       document.head.appendChild(script);
     } else {
       const existing = document.getElementById("lp-popunder-script");
@@ -475,43 +405,19 @@
     if (
       !isPlainObject(histats) ||
       histats.enabled !== true ||
-      typeof histats.siteId !== "string" ||
-      !histats.siteId.trim() ||
-      !isUsableScriptUrl(histats.scriptUrl)
+      typeof histats.script !== "string" ||
+      !histats.script.trim()
     ) {
       return "";
     }
 
-    // placement: "player" atau "lp"
     const placementKey = placement === "lp" ? "lp" : "player";
-    const placementEnabled = histats[placementKey] !== false; // default true kalau tidak diset
+    const placementEnabled = histats[placementKey] !== false;
     if (!placementEnabled) {
       return "";
     }
 
-    const siteId = histats.siteId.trim();
-    const scriptUrl = histats.scriptUrl;
-
-    return `
-      <script>
-        window._Hasync = window._Hasync || [];
-
-        window._Hasync.push([
-          'Histats.start',
-          ${JSON.stringify(siteId)}
-        ]);
-
-        window._Hasync.push(['Histats.fasi', '1']);
-        window._Hasync.push(['Histats.track_hits', '']);
-
-        (function () {
-          var hs = document.createElement('script');
-          hs.async = true;
-          hs.src = ${JSON.stringify(scriptUrl)};
-          document.head.appendChild(hs);
-        })();
-      </script>
-    `;
+    return histats.script.trim();
   }
 
   function mountLpHistats(config) {
@@ -519,9 +425,8 @@
     if (
       !histats ||
       histats.enabled !== true ||
-      typeof histats.siteId !== "string" ||
-      !histats.siteId.trim() ||
-      !isUsableScriptUrl(histats.scriptUrl) ||
+      typeof histats.script !== "string" ||
+      !histats.script.trim() ||
       histats.lp === false
     ) {
       const existing = document.getElementById("lp-histats-script");
@@ -532,23 +437,9 @@
     const existing = document.getElementById("lp-histats-script");
     if (existing) existing.remove();
 
-    const siteId = histats.siteId.trim();
-    const scriptUrl = histats.scriptUrl;
-
     const script = document.createElement("script");
     script.id = "lp-histats-script";
-    script.textContent = `
-      window._Hasync = window._Hasync || [];
-      window._Hasync.push(['Histats.start', ${JSON.stringify(siteId)}]);
-      window._Hasync.push(['Histats.fasi', '1']);
-      window._Hasync.push(['Histats.track_hits', '']);
-      (function () {
-        var hs = document.createElement('script');
-        hs.async = true;
-        hs.src = ${JSON.stringify(scriptUrl)};
-        document.head.appendChild(hs);
-      })();
-    `;
+    script.textContent = histats.script.trim();
     document.head.appendChild(script);
   }
 
