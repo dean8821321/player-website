@@ -236,14 +236,17 @@
   }
 
   function initializePreview() {
+    const pageLabel = activePageName || DEFAULT_SITE_TITLE;
+    document.title = activeVideo
+      ? `${pageLabel} - ${activeVideo.id}`
+      : pageLabel;
+
     if (!activeVideo || !activeVideoUrl) {
       showPreviewError("Video belum tersedia.");
       playButton.disabled = true;
       playButton.setAttribute("aria-disabled", "true");
       return;
     }
-
-    document.title = `${activePageName} - ${activeVideo.id}`;
 
     title.textContent = `Video ID: ${activeVideo.id}`;
 
