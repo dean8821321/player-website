@@ -415,7 +415,13 @@
     const lp = ads && isPlainObject(ads.lp) ? ads.lp : null;
 
     // Iklan LP punya saklar sendiri, tidak ikut saklar iklan player.
-    if (!lp || lp.enabled !== true || typeof lp.script !== "string" || !lp.script.trim()) {
+    if (
+      !lp ||
+      lp.enabled !== true ||
+      lp.banner === false ||
+      typeof lp.script !== "string" ||
+      !lp.script.trim()
+    ) {
       setLpReserve([]);
     } else {
       const position = ["top", "bottom", "both"].includes(lp.position)
